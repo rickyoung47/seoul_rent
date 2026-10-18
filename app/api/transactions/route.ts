@@ -30,9 +30,9 @@ type SeoulApiResponse = {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const district = searchParams.get('district') ?? '';
-  const homeType = searchParams.get('homeType') ?? '';
+  const homeType = searchParams.get('homeType');
 
-  if (!districts.has(district) || !homeTypes.has(homeType)) {
+  if (!districts.has(district) || (homeType && !homeTypes.has(homeType))) {
     return Response.json({ error: '구와 주택유형을 다시 선택해 주세요.' }, { status: 400 });
   }
 
@@ -50,7 +50,7 @@ export async function GET(request: Request) {
       const result = payload.tbLnOpendataRentV;
       if (result?.RESULT && result.RESULT.CODE !== 'INFO-000') throw new Error(result.RESULT.MESSAGE || `${year}년 자료 조회에 실패했습니다.`);
       const fetchedRows = (result?.row ?? []).filter((row) => row.CGG_NM === district && row.RCPT_YR === String(year));
-      const rows = fetchedRows.filter((row) => row.BLDG_USG === homeType);
+      const rows = homeType ? fetchedRows.filter((row) => row.BLDG_USG === homeType) : fetchedRows;
       return { year, rows, fetched: fetchedRows.length, total: Number(result?.list_total_count ?? fetchedRows.length) };
     }));
 

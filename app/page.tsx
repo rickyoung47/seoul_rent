@@ -58,6 +58,32 @@ function featurePath(feature: DistrictFeature, bounds: [number, number, number, 
 }
 
 function featureCenter(feature: DistrictFeature, bounds: [number, number, number, number]) {
+  let weightedX = 0;
+  let weightedY = 0;
+  let totalArea = 0;
+  const polygons = coordinateRings(feature);
+  for (const polygon of polygons) {
+    polygon.forEach((ring, ringIndex) => {
+      const points = ring.map((point) => projectPoint(point, bounds));
+      let areaTwice = 0;
+      let centroidX = 0;
+      let centroidY = 0;
+      for (let index = 0; index < points.length - 1; index += 1) {
+        const [x1, y1] = points[index];
+        const [x2, y2] = points[index + 1];
+        const cross = x1 * y2 - x2 * y1;
+        areaTwice += cross;
+        centroidX += (x1 + x2) * cross;
+        centroidY += (y1 + y2) * cross;
+      }
+      if (Math.abs(areaTwice) < 0.001) return;
+      const area = Math.abs(areaTwice) / 2 * (ringIndex === 0 ? 1 : -1);
+      weightedX += (centroidX / (3 * areaTwice)) * area;
+      weightedY += (centroidY / (3 * areaTwice)) * area;
+      totalArea += area;
+    });
+  }
+  if (totalArea > 0) return [weightedX / totalArea, weightedY / totalArea] as const;
   const points = geometryPoints(feature);
   const mean = points.reduce(([x, y], point) => [x + point[0], y + point[1]], [0, 0]);
   return projectPoint([mean[0] / points.length, mean[1] / points.length], bounds);
@@ -119,11 +145,12 @@ export default function HomePage() {
   }, []);
 
   useEffect(() => {
-    if (!district || !homeType) return;
+    if (!district) return;
     const controller = new AbortController();
     setLoadingTransactions(true);
     setTransactionError(null);
-    fetch(`/api/transactions?district=${encodeURIComponent(district)}&homeType=${encodeURIComponent(homeType)}`, { signal: controller.signal })
+    const homeTypeQuery = homeType ? `&homeType=${encodeURIComponent(homeType)}` : '';
+    fetch(`/api/transactions?district=${encodeURIComponent(district)}${homeTypeQuery}`, { signal: controller.signal })
       .then(async (response) => {
         const data = await response.json() as { rows?: Transaction[]; years?: YearCount[]; error?: string };
         if (!response.ok) throw new Error(data.error || '거래 내역을 불러오지 못했습니다.');
@@ -233,8 +260,8 @@ export default function HomePage() {
           </div>
         </section>
         <section className="mt-7 grid gap-6 lg:grid-cols-2">
-          <PriceTrendChart title="지난 3년 전세 보증금 평균" data={!district || !homeType || loadingTransactions || transactionError ? [] : annualAverages} field="jeonse" color="#2563eb" />
-          <PriceTrendChart title="지난 3년 월세 평균" data={!district || !homeType || loadingTransactions || transactionError ? [] : annualAverages} field="wolse" color="#059669" />
+          <PriceTrendChart title="지난 3년 전세 보증금 평균" data={!district || loadingTransactions || transactionError ? [] : annualAverages} field="jeonse" color="#2563eb" />
+          <PriceTrendChart title="지난 3년 월세 평균" data={!district || loadingTransactions || transactionError ? [] : annualAverages} field="wolse" color="#059669" />
         </section>
         <p className="mt-8 border-t border-slate-200 pt-5 text-xs leading-5 text-slate-500">평균은 최근 3개 접수연도 API 조회분 기준이며 단위는 만원입니다. API는 연도별 최대 1,000건을 반환합니다. 계약 자료는 서울시 열린데이터광장, 지도 경계는 southkorea/seoul-maps 자료를 사용합니다.</p>
       </div>
