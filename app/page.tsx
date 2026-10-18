@@ -14,6 +14,7 @@ type Transaction = {
   FLR: number | string; BLDG_USG: string; CTRT_PRD: string; NEW_UPDT_YN: string;
 };
 type YearCount = { year: number; count: number; fetched: number; total: number };
+type CitywideYear = { year: number; jeonseSum: number; jeonseCount: number; wolseSum: number; wolseCount: number; partial: boolean };
 const homeTypes = ['아파트', '단독다가구', '연립다세대', '오피스텔'];
 
 function parseCsv(text: string): JeonseRow[] {
@@ -54,9 +55,11 @@ export default function HomePage() {
   const [periodMode, setPeriodMode] = useState('month');
   const [selectedYear, setSelectedYear] = useState<string | null>(null);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
-  const [selectionTab, setSelectionTab] = useState('district');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [yearCounts, setYearCounts] = useState<YearCount[]>([]);
+  const [citywideYears, setCitywideYears] = useState<CitywideYear[]>([]);
+  const [loadingCitywide, setLoadingCitywide] = useState(true);
+  const [citywideError, setCitywideError] = useState<string | null>(null);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [transactionError, setTransactionError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +67,20 @@ export default function HomePage() {
   useEffect(() => {
     fetch('/jeonse_mean.csv').then((response) => { if (!response.ok) throw new Error('평균 데이터를 불러오지 못했습니다.'); return response.text(); })
       .then((csv) => setRows(parseCsv(csv))).catch((loadError: Error) => setError(loadError.message));
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const years = [new Date().getUTCFullYear() - 2, new Date().getUTCFullYear() - 1, new Date().getUTCFullYear()];
+    Promise.all(years.map(async (year) => {
+      const response = await fetch(`/api/citywide?year=${year}`, { signal: controller.signal });
+      const data = await response.json() as CitywideYear & { error?: string };
+      if (!response.ok) throw new Error(data.error || '서울시 전체 평균을 불러오지 못했습니다.');
+      return data;
+    })).then(setCitywideYears)
+      .catch((loadError: Error) => { if (loadError.name !== 'AbortError') setCitywideError(loadError.message); })
+      .finally(() => { if (!controller.signal.aborted) setLoadingCitywide(false); });
+    return () => controller.abort();
   }, []);
 
   useEffect(() => {
@@ -101,6 +118,16 @@ export default function HomePage() {
   const averageAllWolse = average(allWolseValues);
   const medianAllJeonse = median(allJeonseValues);
   const medianAllWolse = median(allWolseValues);
+  const citywideAverages = useMemo(() => {
+    const totals = citywideYears.reduce((sum, year) => ({
+      jeonseSum: sum.jeonseSum + year.jeonseSum,
+      jeonseCount: sum.jeonseCount + year.jeonseCount,
+      wolseSum: sum.wolseSum + year.wolseSum,
+      wolseCount: sum.wolseCount + year.wolseCount,
+    }), { jeonseSum: 0, jeonseCount: 0, wolseSum: 0, wolseCount: 0 });
+    return { jeonse: totals.jeonseCount ? totals.jeonseSum / totals.jeonseCount : null, wolse: totals.wolseCount ? totals.wolseSum / totals.wolseCount : null };
+  }, [citywideYears]);
+  const citywidePartial = citywideYears.some((year) => year.partial);
   const availableYears = useMemo(() => [...new Set(allTypeTransactions.map((row) => row.CTRT_DAY.slice(0, 4)).filter((year) => /^\d{4}$/.test(year)))].sort((a, b) => b.localeCompare(a)), [allTypeTransactions]);
   const availableMonths = useMemo(() => [...new Set(allTypeTransactions.map((row) => row.CTRT_DAY.slice(0, 6)).filter((month) => /^\d{6}$/.test(month)))].sort((a, b) => b.localeCompare(a)), [allTypeTransactions]);
   const effectiveYear = selectedYear && availableYears.includes(selectedYear) ? selectedYear : availableYears[0] ?? null;
@@ -121,38 +148,32 @@ export default function HomePage() {
               <div className="flex items-start justify-between gap-4"><div><CardTitle className="text-lg">서울 동 단위 지도</CardTitle><p className="mt-1 text-sm text-slate-500">지도를 확대해 동 경계를 누르면 해당 동의 거래를 확인할 수 있습니다.</p></div><MapPin className="mt-1 size-5 text-blue-600" aria-hidden="true" /></div>
             </CardHeader>
             <CardContent className="p-4 sm:p-6">
-              <Tabs value={selectionTab} onValueChange={setSelectionTab}>
-                <TabsList className="grid h-11 w-full grid-cols-2 rounded-xl bg-slate-100 p-1">
-                  <TabsTrigger value="district" className="rounded-lg">1. 구 선택</TabsTrigger>
-                  <TabsTrigger value="dong" className="rounded-lg" disabled={!district}>2. 동 선택</TabsTrigger>
-                </TabsList>
-                <TabsContent value="district" className="mt-4">
-                  <p className="mb-3 text-sm text-slate-500">먼저 거래를 확인할 서울 자치구를 선택하세요.</p>
-                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-                    {districts.map((name) => <button key={name} type="button" onClick={() => { setDistrict(name); setNeighborhood(null); setNeighborhoodCode(null); setSelectionTab('dong'); }} className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${district === name ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50'}`}>{name}</button>)}
+              <div className="grid items-start gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+                <div>
+                  <SeoulDongMap selectedDistrict={district} selectedDong={neighborhood} selectedDongCode={neighborhoodCode} districtFilter={district} onSelect={(selectedGu, selectedDong, dongCode) => { setDistrict(selectedGu); setNeighborhood(selectedDong); setNeighborhoodCode(dongCode); }} />
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>지도를 확대하고 이동한 뒤 동 경계를 누르세요.</span><span className="flex items-center gap-1.5"><i className="size-3 rounded-sm bg-blue-600" />선택한 동</span></div>
+                </div>
+                <div className="space-y-5">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+                    <div><span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><MapPin className="size-4 text-blue-600" aria-hidden="true" />구 선택</span>
+                      <Select value={district} onValueChange={(value) => { setDistrict(value); setNeighborhood(null); setNeighborhoodCode(null); }}><SelectTrigger className="h-11 w-full rounded-xl bg-white"><SelectValue placeholder="서울 자치구를 선택하세요" /></SelectTrigger><SelectContent className="max-h-72">{districts.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select>
+                    </div>
+                    <div><span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><MapPin className="size-4 text-blue-600" aria-hidden="true" />동 선택</span>
+                      <Select value={neighborhood} onValueChange={(value) => { setNeighborhood(value); setNeighborhoodCode(null); }} disabled={!district}><SelectTrigger className="h-11 w-full rounded-xl bg-white"><SelectValue placeholder={district ? '동을 선택하세요' : '구를 먼저 선택하세요'} /></SelectTrigger><SelectContent className="max-h-72">{neighborhoods.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select>
+                    </div>
                   </div>
-                </TabsContent>
-                <TabsContent value="dong" className="mt-4">
-                  {!district ? <p className="rounded-xl bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">먼저 ‘구 선택’ 탭에서 자치구를 선택하세요.</p> : <>
-                    <div className="mb-3 flex items-center justify-between gap-3"><p className="text-sm font-semibold text-slate-700">{district}에서 동을 선택하세요.</p><button type="button" className="text-xs font-semibold text-blue-600 hover:text-blue-800" onClick={() => setSelectionTab('district')}>구 변경</button></div>
-                    <SeoulDongMap selectedDistrict={district} selectedDong={neighborhood} selectedDongCode={neighborhoodCode} districtFilter={district} onSelect={(_selectedGu, selectedDong, dongCode) => { setNeighborhood(selectedDong); setNeighborhoodCode(dongCode); }} />
-                    {error && <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>지도를 확대하고 이동한 뒤 선택한 구의 동 경계를 누르세요.</span><span className="flex items-center gap-1.5"><i className="size-3 rounded-sm bg-blue-600" />선택한 동</span></div>
-                    <div className="mt-5"><span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><MapPin className="size-4 text-blue-600" aria-hidden="true" />동 선택</span>
-                      <Select value={neighborhood} onValueChange={(value) => { setNeighborhood(value); setNeighborhoodCode(null); }}><SelectTrigger className="h-11 w-full rounded-xl bg-white"><SelectValue placeholder="동을 선택하세요" /></SelectTrigger><SelectContent className="max-h-72">{neighborhoods.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select>
-                    </div>
-                    <div className="mt-5"><span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><Building2 className="size-4 text-blue-600" aria-hidden="true" />주택유형</span>
-                      <Tabs value={homeType} onValueChange={setHomeType}>
-                        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1 sm:grid-cols-5">
-                          <TabsTrigger value="all" className="rounded-lg px-2 py-2">모든 유형</TabsTrigger>
-                          {homeTypes.map((type) => <TabsTrigger key={type} value={type} className="rounded-lg px-2 py-2">{type}</TabsTrigger>)}
-                        </TabsList>
-                      </Tabs>
-                    </div>
-                  </>}
-                </TabsContent>
-              </Tabs>
-              {district && <div className="mt-4 flex items-center justify-between rounded-xl bg-blue-50 px-4 py-3"><p className="text-sm font-semibold text-blue-800">선택 지역 <span className="ml-2 text-blue-600">{district}{neighborhood ? ` · ${neighborhood}` : ''}</span></p><button type="button" className="text-xs font-semibold text-blue-600 hover:text-blue-800" onClick={() => { setDistrict(null); setNeighborhood(null); setNeighborhoodCode(null); setSelectionTab('district'); }}>지역 변경</button></div>}
+                  <div><span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><Building2 className="size-4 text-blue-600" aria-hidden="true" />주택유형</span>
+                    <Tabs value={homeType} onValueChange={setHomeType}>
+                      <TabsList className="grid h-auto w-full min-w-0 grid-cols-2 gap-1 overflow-hidden rounded-xl bg-slate-100 p-1 sm:grid-cols-3">
+                        <TabsTrigger value="all" className="min-w-0 overflow-hidden rounded-lg px-1.5 py-2 text-xs leading-tight">모든 유형</TabsTrigger>
+                        {homeTypes.map((type) => <TabsTrigger key={type} value={type} className="min-w-0 overflow-hidden rounded-lg px-1.5 py-2 text-xs leading-tight">{type}</TabsTrigger>)}
+                      </TabsList>
+                    </Tabs>
+                  </div>
+                  {district && <p className="rounded-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">선택 지역 <span className="ml-2 text-blue-600">{district}{neighborhood ? ` · ${neighborhood}` : ''}</span></p>}
+                  {error && <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+                </div>
+              </div>
             </CardContent>
           </Card>
 
@@ -160,6 +181,13 @@ export default function HomePage() {
             <Card className="border-blue-100 bg-white py-0 shadow-sm">
               <CardHeader className="border-b border-slate-100 px-6 py-5"><CardTitle className="text-lg">평균 전월세 금액</CardTitle><p className="text-sm text-slate-500">선택한 동의 최근 3년 공개 계약 기준 · 단위 만원</p></CardHeader>
               <CardContent className="px-6 py-5" aria-live="polite">
+                <section className="mb-5 rounded-2xl border border-blue-100 bg-blue-50/60 p-4">
+                  <h3 className="mb-3 text-sm font-bold text-slate-700">서울시 전체 평균 · 최근 3년</h3>
+                  {loadingCitywide ? <p className="text-sm text-slate-500">서울시 평균을 계산하고 있습니다…</p> : citywideError ? <p className="text-sm text-rose-600">{citywideError}</p> : <>
+                    <div className="grid grid-cols-2 gap-3"><div className="rounded-xl bg-white p-3"><p className="text-xs font-semibold text-slate-500">평균 전세 보증금</p><p className="mt-1 text-lg font-bold text-blue-700">{citywideAverages.jeonse === null ? '자료 없음' : formatPrice(citywideAverages.jeonse)}</p></div><div className="rounded-xl bg-white p-3"><p className="text-xs font-semibold text-slate-500">평균 월세</p><p className="mt-1 text-lg font-bold text-emerald-700">{citywideAverages.wolse === null ? '자료 없음' : `${formatPrice(citywideAverages.wolse)} /월`}</p></div></div>
+                    <p className="mt-2 text-xs leading-5 text-slate-500">서울 25개 구의 API 조회 계약 합산 기준입니다.{citywidePartial ? ' 일부 구는 API 조회 한도에 따른 일부 계약만 포함됩니다.' : ''}</p>
+                  </>}
+                </section>
                 {!district || !neighborhood ? <p className="py-5 text-sm leading-6 text-slate-500">구와 동을 선택하면 해당 동의 평균과 중위값을 보여드립니다.</p> : loadingTransactions ? <p className="py-5 text-sm text-slate-500">평균 금액을 계산하고 있습니다…</p> : transactionError ? <p className="py-5 text-sm font-medium text-rose-600">{transactionError}</p> : <>
                   {homeType !== 'all' && <section className="mb-5 rounded-2xl border border-slate-200 p-4">
                     <h3 className="mb-3 text-sm font-bold text-slate-700">모든 유형 평균 · {district} {neighborhood}</h3>
