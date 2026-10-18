@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Building2, Database, Home, MapPin, Search } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { VWorldDongMap } from '@/components/vworld-dong-map';
 
 type JeonseRow = { CGG_NM: string; STDG_NM: string; BLDG_USG: string; 평균전세가_만원: string; 거래건수: string };
 type Transaction = {
@@ -13,12 +14,7 @@ type Transaction = {
 };
 type YearCount = { year: number; count: number; fetched: number; total: number };
 type AnnualAverage = { year: number; jeonse: number | null; wolse: number | null; jeonseCount: number; wolseCount: number };
-type DistrictFeature = { type: 'Feature'; properties: { SIG_KOR_NM: string }; geometry: { type: 'Polygon' | 'MultiPolygon'; coordinates: number[][][][] | number[][][] } };
-type DistrictCollection = { type: 'FeatureCollection'; features: DistrictFeature[] };
-
 const homeTypes = ['아파트', '단독다가구', '연립다세대', '오피스텔'];
-const mapWidth = 560;
-const mapHeight = 500;
 
 function parseCsv(text: string): JeonseRow[] {
   const [header, ...lines] = text.trim().replace(/^\uFEFF/, '').split(/\r?\n/);
@@ -32,91 +28,6 @@ function formatPrice(value: number) {
   const man = rounded % 10000;
   if (eok === 0) return `${man.toLocaleString()}만원`;
   return man === 0 ? `${eok}억원` : `${eok}억 ${man.toLocaleString()}만원`;
-}
-
-function coordinateRings(feature: DistrictFeature): number[][][][] {
-  return feature.geometry.type === 'Polygon'
-    ? [feature.geometry.coordinates as number[][][]]
-    : feature.geometry.coordinates as number[][][][];
-}
-
-function geometryPoints(feature: DistrictFeature) {
-  return coordinateRings(feature).flat(2);
-}
-
-function projectPoint([longitude, latitude]: number[], bounds: [number, number, number, number]) {
-  const [minX, minY, maxX, maxY] = bounds;
-  const padding = 18;
-  const point = mercatorPixel(longitude, latitude, 11);
-  const topLeft = mercatorPixel(minX, maxY, 11);
-  const bottomRight = mercatorPixel(maxX, minY, 11);
-  return [padding + ((point[0] - topLeft[0]) / (bottomRight[0] - topLeft[0])) * (mapWidth - padding * 2), padding + ((point[1] - topLeft[1]) / (bottomRight[1] - topLeft[1])) * (mapHeight - padding * 2)] as const;
-}
-
-function mercatorPixel(longitude: number, latitude: number, zoom: number) {
-  const scale = 256 * 2 ** zoom;
-  const sinLatitude = Math.sin(Math.max(-85.05112878, Math.min(85.05112878, latitude)) * Math.PI / 180);
-  return [(longitude + 180) / 360 * scale, (0.5 - Math.log((1 + sinLatitude) / (1 - sinLatitude)) / (4 * Math.PI)) * scale] as const;
-}
-
-function mapTiles(bounds: [number, number, number, number]) {
-  const zoom = 11;
-  const [minLon, minLat, maxLon, maxLat] = bounds;
-  const topLeft = mercatorPixel(minLon, maxLat, zoom);
-  const bottomRight = mercatorPixel(maxLon, minLat, zoom);
-  const padding = 18;
-  const width = mapWidth - padding * 2;
-  const height = mapHeight - padding * 2;
-  const firstX = Math.floor(topLeft[0] / 256);
-  const lastX = Math.floor(bottomRight[0] / 256);
-  const firstY = Math.floor(topLeft[1] / 256);
-  const lastY = Math.floor(bottomRight[1] / 256);
-  return Array.from({ length: (lastX - firstX + 1) * (lastY - firstY + 1) }, (_, index) => {
-    const x = firstX + index % (lastX - firstX + 1);
-    const y = firstY + Math.floor(index / (lastX - firstX + 1));
-    const left = padding + (x * 256 - topLeft[0]) / (bottomRight[0] - topLeft[0]) * width;
-    const top = padding + (y * 256 - topLeft[1]) / (bottomRight[1] - topLeft[1]) * height;
-    return { x, y, left, top, width: 256 / (bottomRight[0] - topLeft[0]) * width, height: 256 / (bottomRight[1] - topLeft[1]) * height };
-  });
-}
-
-function featurePath(feature: DistrictFeature, bounds: [number, number, number, number]) {
-  return coordinateRings(feature).map((polygon) => polygon.map((ring) => ring.map((point, index) => {
-    const [x, y] = projectPoint(point, bounds);
-    return `${index ? 'L' : 'M'}${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(' ') + ' Z').join(' ')).join(' ');
-}
-
-function featureCenter(feature: DistrictFeature, bounds: [number, number, number, number]) {
-  let weightedX = 0;
-  let weightedY = 0;
-  let totalArea = 0;
-  const polygons = coordinateRings(feature);
-  for (const polygon of polygons) {
-    polygon.forEach((ring, ringIndex) => {
-      const points = ring.map((point) => projectPoint(point, bounds));
-      let areaTwice = 0;
-      let centroidX = 0;
-      let centroidY = 0;
-      for (let index = 0; index < points.length - 1; index += 1) {
-        const [x1, y1] = points[index];
-        const [x2, y2] = points[index + 1];
-        const cross = x1 * y2 - x2 * y1;
-        areaTwice += cross;
-        centroidX += (x1 + x2) * cross;
-        centroidY += (y1 + y2) * cross;
-      }
-      if (Math.abs(areaTwice) < 0.001) return;
-      const area = Math.abs(areaTwice) / 2 * (ringIndex === 0 ? 1 : -1);
-      weightedX += (centroidX / (3 * areaTwice)) * area;
-      weightedY += (centroidY / (3 * areaTwice)) * area;
-      totalArea += area;
-    });
-  }
-  if (totalArea > 0) return [weightedX / totalArea, weightedY / totalArea] as const;
-  const points = geometryPoints(feature);
-  const mean = points.reduce(([x, y], point) => [x + point[0], y + point[1]], [0, 0]);
-  return projectPoint([mean[0] / points.length, mean[1] / points.length], bounds);
 }
 
 function formatContractDate(value: string) {
@@ -157,7 +68,6 @@ function PriceTrendChart({ title, data, field, color }: { title: string; data: A
 
 export default function HomePage() {
   const [rows, setRows] = useState<JeonseRow[]>([]);
-  const [districts, setDistricts] = useState<DistrictCollection | null>(null);
   const [district, setDistrict] = useState<string | null>(null);
   const [neighborhood, setNeighborhood] = useState<string | null>(null);
   const [homeType, setHomeType] = useState<string | null>(null);
@@ -168,10 +78,8 @@ export default function HomePage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([
-      fetch('/jeonse_mean.csv').then((response) => { if (!response.ok) throw new Error('평균 데이터를 불러오지 못했습니다.'); return response.text(); }),
-      fetch('/seoul-districts.geo.json').then((response) => { if (!response.ok) throw new Error('지도 데이터를 불러오지 못했습니다.'); return response.json() as Promise<DistrictCollection>; }),
-    ]).then(([csv, map]) => { setRows(parseCsv(csv)); setDistricts(map); }).catch((loadError: Error) => setError(loadError.message));
+    fetch('/jeonse_mean.csv').then((response) => { if (!response.ok) throw new Error('평균 데이터를 불러오지 못했습니다.'); return response.text(); })
+      .then((csv) => setRows(parseCsv(csv))).catch((loadError: Error) => setError(loadError.message));
   }, []);
 
   useEffect(() => {
@@ -192,11 +100,6 @@ export default function HomePage() {
     return () => controller.abort();
   }, [district, homeType]);
 
-  const bounds = useMemo<[number, number, number, number] | null>(() => {
-    if (!districts?.features.length) return null;
-    const points = districts.features.flatMap(geometryPoints);
-    return [Math.min(...points.map((point) => point[0])), Math.min(...points.map((point) => point[1])), Math.max(...points.map((point) => point[0])), Math.max(...points.map((point) => point[1]))];
-  }, [districts]);
   const neighborhoods = useMemo(() => [...new Set(rows.filter((row) => row.CGG_NM === district).map((row) => row.STDG_NM))].sort((a, b) => a.localeCompare(b, 'ko')), [district, rows]);
   const transactionTypes = ['전세', '월세'] as const;
   const selectedTransactions = useMemo(() => transactions.filter((row) => !neighborhood || row.STDG_NM === neighborhood), [neighborhood, transactions]);
@@ -209,9 +112,6 @@ export default function HomePage() {
     return { year, jeonse: average(jeonse), wolse: average(wolse), jeonseCount: jeonse.length, wolseCount: wolse.length };
   }), [selectedTransactions, yearCounts]);
   const isPartialHistory = yearCounts.some((year) => year.total > year.fetched);
-  const transactionCountByDistrict = useMemo(() => rows.reduce<Record<string, number>>((acc, row) => { acc[row.CGG_NM] = (acc[row.CGG_NM] || 0) + Number(row.거래건수 || 0); return acc; }, {}), [rows]);
-  const maxDistrictCount = Math.max(1, ...Object.values(transactionCountByDistrict));
-
   return (
     <main className="min-h-screen bg-[#f7f9fc] text-slate-900">
       <div className="mx-auto max-w-7xl px-5 py-8 sm:px-8 sm:py-12">
@@ -223,25 +123,12 @@ export default function HomePage() {
         <section className="grid gap-7 lg:grid-cols-[1.05fr_0.95fr]">
           <Card className="overflow-hidden border-slate-200 bg-white py-0 shadow-sm">
             <CardHeader className="border-b border-slate-100 px-6 py-5">
-              <div className="flex items-start justify-between gap-4"><div><CardTitle className="text-lg">서울 자치구 지도</CardTitle><p className="mt-1 text-sm text-slate-500">지도를 눌러 거래를 확인할 지역을 선택하세요.</p></div><MapPin className="mt-1 size-5 text-blue-600" aria-hidden="true" /></div>
+              <div className="flex items-start justify-between gap-4"><div><CardTitle className="text-lg">서울 동 단위 지도</CardTitle><p className="mt-1 text-sm text-slate-500">지도를 확대해 동 경계를 누르면 해당 동의 거래를 확인할 수 있습니다.</p></div><MapPin className="mt-1 size-5 text-blue-600" aria-hidden="true" /></div>
             </CardHeader>
             <CardContent className="p-4 sm:p-6">
-              <div className="overflow-hidden rounded-2xl bg-[#f2f6fb]">
-                {districts && bounds ? <svg viewBox={`0 0 ${mapWidth} ${mapHeight}`} className="mx-auto block h-auto w-full max-w-[590px]" aria-label="VWorld 서울시 자치구 선택 지도"><title>VWorld 서울시 자치구 선택 지도</title>
-                  {mapTiles(bounds).map((tile) => <image key={`${tile.x}-${tile.y}`} href={`/api/vworld-tile?z=11&x=${tile.x}&y=${tile.y}`} x={tile.left} y={tile.top} width={tile.width} height={tile.height} preserveAspectRatio="none" />)}
-                  {districts.features.map((feature) => {
-                    const name = feature.properties.SIG_KOR_NM;
-                    const [x, y] = featureCenter(feature, bounds);
-                    const count = transactionCountByDistrict[name] || 0;
-                    const opacity = 0.12 + (count / maxDistrictCount) * 0.28;
-                    return <g key={name} className="cursor-pointer outline-none" role="button" tabIndex={0} aria-label={`${name} 선택`} aria-pressed={district === name} onClick={() => { setDistrict(name); setNeighborhood(null); }} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setDistrict(name); setNeighborhood(null); } }}>
-                      <path d={featurePath(feature, bounds)} fill={district === name ? '#2563eb' : `rgba(59, 130, 246, ${opacity})`} stroke="white" strokeWidth="1.4" className="transition-colors hover:fill-blue-500 focus-visible:stroke-slate-900" />
-                      <text x={x} y={y} textAnchor="middle" dominantBaseline="central" className={`pointer-events-none select-none text-[9px] font-semibold sm:text-[10px] ${district === name ? 'fill-white' : 'fill-slate-800'}`}>{name.replace('구', '')}</text>
-                    </g>;
-                  })}
-                </svg> : <div className="grid h-72 place-items-center text-sm text-slate-500">{error || '지도를 불러오는 중입니다.'}</div>}
-              </div>
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>지도 출처: 브이월드 · 색이 진할수록 요약 데이터 거래 건수가 많습니다.</span><span className="flex items-center gap-1.5"><i className="size-3 rounded-sm bg-blue-600" />선택한 구</span></div>
+              <VWorldDongMap selectedDistrict={district} selectedDong={neighborhood} onSelect={(selectedGu, selectedDong) => { setDistrict(selectedGu); setNeighborhood(selectedDong); }} />
+              {error && <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>지도 출처: 브이월드 · 지도를 확대하면 동 이름이 표시됩니다.</span><span className="flex items-center gap-1.5"><i className="size-3 rounded-sm bg-blue-600" />선택한 동</span></div>
               <div className="mt-6 grid gap-4 sm:grid-cols-2">
                 <div><span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><MapPin className="size-4 text-blue-600" aria-hidden="true" />동 선택</span>
                   <Select value={neighborhood} onValueChange={setNeighborhood} disabled={!district}><SelectTrigger className="h-11 w-full rounded-xl bg-white"><SelectValue placeholder={district ? '동을 선택하세요' : '먼저 지도에서 구를 선택하세요'} /></SelectTrigger><SelectContent className="max-h-72">{neighborhoods.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select>
@@ -294,7 +181,7 @@ export default function HomePage() {
           <PriceTrendChart title="지난 3년 전세 보증금 평균" data={!district || loadingTransactions || transactionError ? [] : annualAverages} field="jeonse" color="#2563eb" />
           <PriceTrendChart title="지난 3년 월세 평균" data={!district || loadingTransactions || transactionError ? [] : annualAverages} field="wolse" color="#059669" />
         </section>
-        <p className="mt-8 border-t border-slate-200 pt-5 text-xs leading-5 text-slate-500">평균은 최근 3개 접수연도 API 조회분 기준이며 단위는 만원입니다. API는 연도별 최대 1,000건을 반환합니다. 계약 자료는 서울시 열린데이터광장, 지도 경계는 southkorea/seoul-maps 자료를 사용합니다.</p>
+        <p className="mt-8 border-t border-slate-200 pt-5 text-xs leading-5 text-slate-500">평균은 최근 3개 접수연도 API 조회분 기준이며 단위는 만원입니다. API는 연도별 최대 1,000건을 반환합니다. 계약 자료는 서울시 열린데이터광장, 동 경계는 southkorea/seoul-maps (JUSO 2015) 자료를 사용합니다.</p>
       </div>
     </main>
   );
