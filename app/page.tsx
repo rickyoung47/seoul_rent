@@ -11,6 +11,8 @@ type Transaction = {
   RENT_AREA: number | string; GRFE: number | string; RTFE: number | string; BLDG_NM: string;
   FLR: number | string; BLDG_USG: string; CTRT_PRD: string; NEW_UPDT_YN: string;
 };
+type YearCount = { year: number; count: number; total: number };
+type AnnualAverage = { year: number; jeonse: number | null; wolse: number | null; jeonseCount: number; wolseCount: number };
 type DistrictFeature = { type: 'Feature'; properties: { SIG_KOR_NM: string }; geometry: { type: 'Polygon' | 'MultiPolygon'; coordinates: number[][][][] | number[][][] } };
 type DistrictCollection = { type: 'FeatureCollection'; features: DistrictFeature[] };
 
@@ -65,6 +67,38 @@ function formatContractDate(value: string) {
   return value?.length === 8 ? `${value.slice(0, 4)}.${value.slice(4, 6)}.${value.slice(6)}` : value || '날짜 정보 없음';
 }
 
+function average(values: number[]) {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function PriceTrendChart({ title, data, field, color }: { title: string; data: AnnualAverage[]; field: 'jeonse' | 'wolse'; color: string }) {
+  const values = data.map((item) => item[field]).filter((value): value is number => value !== null);
+  const max = Math.max(1, ...values);
+  const baseline = 174;
+  const chartHeight = 122;
+  return <Card className="border-slate-200 bg-white py-0 shadow-sm">
+    <CardHeader className="border-b border-slate-100 px-6 py-5"><CardTitle className="text-lg">{title}</CardTitle><p className="text-sm text-slate-500">연도별 평균 · 금액 단위 만원</p></CardHeader>
+    <CardContent className="px-4 py-5 sm:px-6">
+      {data.some((item) => item[field] !== null) ? <svg viewBox="0 0 600 230" className="block h-auto w-full" role="img" aria-label={title}>
+        <title>{title}</title>
+        <line x1="40" y1={baseline} x2="560" y2={baseline} stroke="#cbd5e1" strokeWidth="1" />
+        {data.map((item, index) => {
+          const value = item[field];
+          const height = value === null ? 0 : Math.max(4, (value / max) * chartHeight);
+          const x = 116 + index * 184;
+          const y = baseline - height;
+          const count = field === 'jeonse' ? item.jeonseCount : item.wolseCount;
+          return <g key={item.year}>
+            {value !== null && <><rect x={x} y={y} width="68" height={height} rx="10" fill={color} /><text x={x + 34} y={Math.max(24, y - 10)} textAnchor="middle" className="fill-slate-700 text-[12px] font-semibold">{Math.round(value).toLocaleString()}</text></>}
+            <text x={x + 34} y="198" textAnchor="middle" className="fill-slate-800 text-[13px] font-bold">{item.year}년</text>
+            <text x={x + 34} y="218" textAnchor="middle" className="fill-slate-400 text-[10px]">{count.toLocaleString()}건 기준</text>
+          </g>;
+        })}
+      </svg> : <div className="grid h-48 place-items-center text-sm text-slate-500">표시할 거래 데이터가 없습니다.</div>}
+    </CardContent>
+  </Card>;
+}
+
 export default function HomePage() {
   const [rows, setRows] = useState<JeonseRow[]>([]);
   const [districts, setDistricts] = useState<DistrictCollection | null>(null);
@@ -72,6 +106,7 @@ export default function HomePage() {
   const [neighborhood, setNeighborhood] = useState<string | null>(null);
   const [homeType, setHomeType] = useState<string | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [yearCounts, setYearCounts] = useState<YearCount[]>([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
   const [transactionError, setTransactionError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -90,11 +125,11 @@ export default function HomePage() {
     setTransactionError(null);
     fetch(`/api/transactions?district=${encodeURIComponent(district)}&homeType=${encodeURIComponent(homeType)}`, { signal: controller.signal })
       .then(async (response) => {
-        const data = await response.json() as { rows?: Transaction[]; error?: string };
+        const data = await response.json() as { rows?: Transaction[]; years?: YearCount[]; error?: string };
         if (!response.ok) throw new Error(data.error || '거래 내역을 불러오지 못했습니다.');
-        return data.rows ?? [];
+        return { rows: data.rows ?? [], years: data.years ?? [] };
       })
-      .then(setTransactions)
+      .then((data) => { setTransactions(data.rows); setYearCounts(data.years); })
       .catch((loadError: Error) => { if (loadError.name !== 'AbortError') setTransactionError(loadError.message); })
       .finally(() => { if (!controller.signal.aborted) setLoadingTransactions(false); });
     return () => controller.abort();
@@ -106,8 +141,17 @@ export default function HomePage() {
     return [Math.min(...points.map((point) => point[0])), Math.min(...points.map((point) => point[1])), Math.max(...points.map((point) => point[0])), Math.max(...points.map((point) => point[1]))];
   }, [districts]);
   const neighborhoods = useMemo(() => [...new Set(rows.filter((row) => row.CGG_NM === district).map((row) => row.STDG_NM))].sort((a, b) => a.localeCompare(b, 'ko')), [district, rows]);
-  const result = useMemo(() => rows.find((row) => row.CGG_NM === district && row.STDG_NM === neighborhood && row.BLDG_USG === homeType), [district, homeType, neighborhood, rows]);
   const transactionTypes = ['전세', '월세'] as const;
+  const selectedTransactions = useMemo(() => transactions.filter((row) => !neighborhood || row.STDG_NM === neighborhood), [neighborhood, transactions]);
+  const averageJeonse = useMemo(() => average(selectedTransactions.filter((row) => row.RENT_SE === '전세').map((row) => Number(row.GRFE)).filter(Number.isFinite)), [selectedTransactions]);
+  const averageWolse = useMemo(() => average(selectedTransactions.filter((row) => row.RENT_SE === '월세').map((row) => Number(row.RTFE)).filter(Number.isFinite)), [selectedTransactions]);
+  const annualAverages = useMemo<AnnualAverage[]>(() => yearCounts.map(({ year }) => {
+    const yearRows = selectedTransactions.filter((row) => row.CTRT_DAY?.startsWith(String(year)));
+    const jeonse = yearRows.filter((row) => row.RENT_SE === '전세').map((row) => Number(row.GRFE)).filter(Number.isFinite);
+    const wolse = yearRows.filter((row) => row.RENT_SE === '월세').map((row) => Number(row.RTFE)).filter(Number.isFinite);
+    return { year, jeonse: average(jeonse), wolse: average(wolse), jeonseCount: jeonse.length, wolseCount: wolse.length };
+  }), [selectedTransactions, yearCounts]);
+  const isPartialHistory = yearCounts.some((year) => year.total > year.count);
   const transactionCountByDistrict = useMemo(() => rows.reduce<Record<string, number>>((acc, row) => { acc[row.CGG_NM] = (acc[row.CGG_NM] || 0) + Number(row.거래건수 || 0); return acc; }, {}), [rows]);
   const maxDistrictCount = Math.max(1, ...Object.values(transactionCountByDistrict));
 
@@ -154,9 +198,17 @@ export default function HomePage() {
 
           <div className="space-y-6">
             <Card className="border-blue-100 bg-white py-0 shadow-sm">
-              <CardHeader className="border-b border-slate-100 px-6 py-5"><CardTitle className="text-lg">평균 전세가</CardTitle><p className="text-sm text-slate-500">동과 주택유형을 선택하면 기존 평균 집계를 보여드립니다.</p></CardHeader>
+              <CardHeader className="border-b border-slate-100 px-6 py-5"><CardTitle className="text-lg">평균 전월세 금액</CardTitle><p className="text-sm text-slate-500">선택한 지역 · 주택유형의 최근 3년 공개 계약 기준</p></CardHeader>
               <CardContent className="px-6 py-5" aria-live="polite">
-                {error ? <p className="text-sm font-medium text-rose-600">{error}</p> : result ? <><p className="text-sm font-semibold text-blue-700">{district} · {neighborhood} · {homeType}</p><p className="mt-2 text-3xl font-bold tracking-tight text-blue-700 sm:text-4xl">{formatPrice(Number(result.평균전세가_만원))}</p><p className="mt-3 text-sm text-slate-600">집계 거래 <strong className="ml-1 text-slate-900">{Number(result.거래건수).toLocaleString()}건</strong></p></> : <p className="py-5 text-sm leading-6 text-slate-500">{district && neighborhood && homeType ? '선택한 조건에 해당하는 평균 데이터가 없습니다.' : '지도에서 구를 고르고 동과 주택유형을 선택하세요.'}</p>}
+                {!district || !homeType ? <p className="py-5 text-sm leading-6 text-slate-500">지도에서 구를 고르고 동과 주택유형을 선택하세요.</p> : loadingTransactions ? <p className="py-5 text-sm text-slate-500">평균 금액을 계산하고 있습니다…</p> : transactionError ? <p className="py-5 text-sm font-medium text-rose-600">{transactionError}</p> : <>
+                  <p className="mb-4 text-sm font-semibold text-blue-700">{district}{neighborhood ? ` · ${neighborhood}` : ''} · {homeType}</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl bg-blue-50 p-4"><p className="text-xs font-semibold text-slate-500">평균 전세 보증금</p><p className="mt-2 text-xl font-bold tracking-tight text-blue-700 sm:text-2xl">{averageJeonse === null ? '자료 없음' : formatPrice(averageJeonse)}</p></div>
+                    <div className="rounded-2xl bg-emerald-50 p-4"><p className="text-xs font-semibold text-slate-500">평균 월세</p><p className="mt-2 text-xl font-bold tracking-tight text-emerald-700 sm:text-2xl">{averageWolse === null ? '자료 없음' : `${formatPrice(averageWolse)} /월`}</p></div>
+                  </div>
+                  <p className="mt-3 text-xs text-slate-500">전세는 보증금, 월세는 월 임대료 평균입니다. 조회 계약 {selectedTransactions.length.toLocaleString()}건 기준</p>
+                  {isPartialHistory && <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">일부 연도는 API 조회 한도(연도별 1,000건)까지의 계약으로 평균을 계산했습니다.</p>}
+                </>}
               </CardContent>
             </Card>
 
@@ -165,7 +217,7 @@ export default function HomePage() {
               <CardContent className="px-0 py-0">
                 {!district || !homeType ? <div className="grid min-h-48 place-items-center px-6 text-center text-sm leading-6 text-slate-500">지도에서 구를 선택하고 주택유형을 고르면<br />전세와 월세 계약 내역을 불러옵니다.</div> : loadingTransactions ? <div className="grid min-h-48 place-items-center text-sm text-slate-500">실거래 내역을 불러오는 중입니다…</div> : transactionError ? <div className="m-5 rounded-xl bg-rose-50 p-4 text-sm leading-6 text-rose-700">{transactionError}</div> : <div className="max-h-[510px] overflow-auto">
                   {transactionTypes.map((type) => {
-                    const filtered = transactions.filter((row) => row.RENT_SE === type && (!neighborhood || row.STDG_NM === neighborhood)).sort((a, b) => b.CTRT_DAY.localeCompare(a.CTRT_DAY));
+                    const filtered = selectedTransactions.filter((row) => row.RENT_SE === type).sort((a, b) => b.CTRT_DAY.localeCompare(a.CTRT_DAY));
                     return <section key={type} className="border-b border-slate-100 last:border-0">
                       <div className="sticky top-0 z-10 flex items-center justify-between bg-slate-50 px-5 py-3"><h3 className="text-sm font-bold text-slate-800">{type}</h3><span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500">{filtered.length}건</span></div>
                       {filtered.length ? <ul className="divide-y divide-slate-100">{filtered.slice(0, 30).map((row, index) => <li key={`${row.CTRT_DAY}-${row.STDG_NM}-${row.BLDG_NM}-${index}`} className="px-5 py-4">
@@ -180,7 +232,11 @@ export default function HomePage() {
             </Card>
           </div>
         </section>
-        <p className="mt-8 border-t border-slate-200 pt-5 text-xs leading-5 text-slate-500">평균 전세가는 기존 집계 파일 기준이며 단위는 만원입니다. 계약 자료는 서울시 열린데이터광장, 지도 경계는 southkorea/seoul-maps 자료를 사용합니다. 실제 조건에 따라 차이가 있을 수 있습니다.</p>
+        <section className="mt-7 grid gap-6 lg:grid-cols-2">
+          <PriceTrendChart title="지난 3년 전세 보증금 평균" data={!district || !homeType || loadingTransactions ? [] : annualAverages} field="jeonse" color="#2563eb" />
+          <PriceTrendChart title="지난 3년 월세 평균" data={!district || !homeType || loadingTransactions ? [] : annualAverages} field="wolse" color="#059669" />
+        </section>
+        <p className="mt-8 border-t border-slate-200 pt-5 text-xs leading-5 text-slate-500">평균은 최근 3개 접수연도 API 조회분 기준이며 단위는 만원입니다. API는 연도별 최대 1,000건을 반환합니다. 계약 자료는 서울시 열린데이터광장, 지도 경계는 southkorea/seoul-maps 자료를 사용합니다.</p>
       </div>
     </main>
   );
