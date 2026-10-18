@@ -16,7 +16,7 @@ export async function GET(request: Request) {
   const apiKey = (env as unknown as Record<string, string | undefined>).VWORLD_API_KEY;
   if (!apiKey) return new Response('Map service is not configured', { status: 503 });
 
-  const upstream = new URL(`https://api.vworld.kr/req/wmts/1.0.0/${encodeURIComponent(apiKey)}/Base/${z}/${y}/${x}.png`);
+  const upstream = new URL(`http://api.vworld.kr/req/wmts/1.0.0/${encodeURIComponent(apiKey)}/Base/${z}/${y}/${x}.png`);
   try {
     const response = await fetch(upstream, {
       headers: { Referer: `${new URL(request.url).origin}/` },
