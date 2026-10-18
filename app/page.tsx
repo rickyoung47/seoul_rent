@@ -148,13 +148,13 @@ export default function HomePage() {
               <div className="flex items-start justify-between gap-4"><div><CardTitle className="text-lg">서울 동 단위 지도</CardTitle><p className="mt-1 text-sm text-slate-500">지도를 확대해 동 경계를 누르면 해당 동의 거래를 확인할 수 있습니다.</p></div><MapPin className="mt-1 size-5 text-blue-600" aria-hidden="true" /></div>
             </CardHeader>
             <CardContent className="p-4 sm:p-6">
-              <div className="grid items-start gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="space-y-5">
                 <div>
                   <SeoulDongMap selectedDistrict={district} selectedDong={neighborhood} selectedDongCode={neighborhoodCode} districtFilter={district} onSelect={(selectedGu, selectedDong, dongCode) => { setDistrict(selectedGu); setNeighborhood(selectedDong); setNeighborhoodCode(dongCode); }} />
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>지도를 확대하고 이동한 뒤 동 경계를 누르세요.</span><span className="flex items-center gap-1.5"><i className="size-3 rounded-sm bg-blue-600" />선택한 동</span></div>
                 </div>
                 <div className="space-y-5">
-                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1">
+                  <div className="grid gap-4 sm:grid-cols-2">
                     <div><span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><MapPin className="size-4 text-blue-600" aria-hidden="true" />구 선택</span>
                       <Select value={district} onValueChange={(value) => { setDistrict(value); setNeighborhood(null); setNeighborhoodCode(null); }}><SelectTrigger className="h-11 w-full rounded-xl bg-white"><SelectValue placeholder="서울 자치구를 선택하세요" /></SelectTrigger><SelectContent className="max-h-72">{districts.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select>
                     </div>

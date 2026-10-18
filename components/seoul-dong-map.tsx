@@ -34,6 +34,7 @@ const districtByCode: Record<string, string> = {
   '11500': '강서구', '11530': '구로구', '11545': '금천구', '11560': '영등포구', '11590': '동작구',
   '11620': '관악구', '11650': '서초구', '11680': '강남구', '11710': '송파구', '11740': '강동구',
 };
+const codeByDistrict = Object.fromEntries(Object.entries(districtByCode).map(([code, name]) => [name, code]));
 
 function project([longitude, latitude]: Position): Point {
   return { x: mapLeft + (mercatorX(longitude) - minX) * scale, y: mapTop + (maxY - mercatorY(latitude)) * scale };
@@ -82,6 +83,34 @@ export function SeoulDongMap({ selectedDistrict, selectedDong, selectedDongCode,
       .catch((error: Error) => { if (error.name !== 'AbortError') setLoadError(error.message); });
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (!features.length) return;
+    if (!selectedDistrict) {
+      setView({ x: 0, y: 0, width: mapWidth, height: mapHeight });
+      return;
+    }
+    const districtCode = codeByDistrict[selectedDistrict];
+    const selectedFeature = selectedDongCode
+      ? features.find((feature) => feature.properties.EMD_CD === selectedDongCode)
+      : selectedDong
+        ? features.find((feature) => feature.properties.EMD_CD.startsWith(districtCode) && feature.properties.EMD_KOR_NM === selectedDong)
+        : null;
+    const targets = selectedFeature ? [selectedFeature] : features.filter((feature) => feature.properties.EMD_CD.startsWith(districtCode));
+    const points = targets.flatMap((feature) => polygons(feature).flat(2).map(project));
+    if (!points.length) return;
+    const minX = Math.min(...points.map((point) => point.x));
+    const maxX = Math.max(...points.map((point) => point.x));
+    const minY = Math.min(...points.map((point) => point.y));
+    const maxY = Math.max(...points.map((point) => point.y));
+    const aspect = mapWidth / mapHeight;
+    const desiredWidth = Math.max((maxX - minX) * 1.2, (maxY - minY) * aspect * 1.2, mapWidth / 8);
+    const width = Math.min(mapWidth, desiredWidth);
+    const height = width / aspect;
+    const centerX = (minX + maxX) / 2;
+    const centerY = (minY + maxY) / 2;
+    setView({ x: centerX - width / 2, y: centerY - height / 2, width, height });
+  }, [features, selectedDistrict, selectedDong, selectedDongCode]);
 
   const paths = useMemo(() => features.map((feature) => ({ feature, path: pathFor(feature), center: featureCenter(feature) })), [features]);
   const zoom = mapWidth / view.width;
