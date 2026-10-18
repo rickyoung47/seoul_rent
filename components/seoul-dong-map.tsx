@@ -58,9 +58,10 @@ function featureCenter(feature: DongFeature): Point {
   return { x: sum.x / points.length, y: sum.y / points.length };
 }
 
-export function SeoulDongMap({ selectedDistrict, selectedDong, onSelect }: {
+export function SeoulDongMap({ selectedDistrict, selectedDong, districtFilter, onSelect }: {
   selectedDistrict: string | null;
   selectedDong: string | null;
+  districtFilter?: string | null;
   onSelect: (district: string, dong: string) => void;
 }) {
   const [features, setFeatures] = useState<DongFeature[]>([]);
@@ -131,10 +132,11 @@ export function SeoulDongMap({ selectedDistrict, selectedDong, onSelect }: {
         const code = feature.properties.EMD_CD.slice(0, 5);
         const name = feature.properties.EMD_KOR_NM;
         const district = districtByCode[code];
+        const enabled = !districtFilter || district === districtFilter;
         const active = district === selectedDistrict && name === selectedDong;
         const labelVisible = zoom >= 3.2 && center.x >= view.x && center.x <= view.x + view.width && center.y >= view.y && center.y <= view.y + view.height;
-        return <g key={feature.properties.EMD_CD} className="cursor-pointer" role="button" tabIndex={0} aria-label={`${district ?? ''} ${name} 선택`} aria-pressed={active} onClick={() => { if (!draggedRef.current && district) onSelect(district, name); draggedRef.current = false; }} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && district) { event.preventDefault(); onSelect(district, name); } }}>
-          <path d={path} fill={active ? '#2563eb' : '#dbe7f0'} stroke={active ? '#1d4ed8' : '#647b8d'} strokeWidth={active ? 1.3 / zoom : 0.55 / zoom} className="transition-colors hover:fill-blue-300" />
+        return <g key={feature.properties.EMD_CD} className={enabled ? 'cursor-pointer' : 'cursor-not-allowed'} role="button" tabIndex={enabled ? 0 : -1} aria-label={`${district ?? ''} ${name}${enabled ? ' 선택' : ' (선택한 구 외부)'}`} aria-disabled={!enabled} aria-pressed={active} onClick={() => { if (!draggedRef.current && district && enabled) onSelect(district, name); draggedRef.current = false; }} onKeyDown={(event) => { if ((event.key === 'Enter' || event.key === ' ') && district && enabled) { event.preventDefault(); onSelect(district, name); } }}>
+          <path d={path} fill={active ? '#2563eb' : enabled ? '#dbe7f0' : '#e8edf1'} stroke={active ? '#1d4ed8' : enabled ? '#647b8d' : '#cbd5e1'} strokeWidth={active ? 1.3 / zoom : 0.55 / zoom} className={enabled ? 'transition-colors hover:fill-blue-300' : ''} />
           {(labelVisible || active) && <text x={center.x} y={center.y} textAnchor="middle" dominantBaseline="central" fontSize={Math.min(11 / zoom, 11)} fontWeight={active ? 700 : 500} fill={active ? '#1d4ed8' : '#334155'} stroke="white" strokeWidth={2 / zoom} paintOrder="stroke" pointerEvents="none">{name}</text>}
           <title>{district} {name}</title>
         </g>;

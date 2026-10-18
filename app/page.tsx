@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Building2, Database, Home, MapPin, Search } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { SeoulDongMap } from '@/components/seoul-dong-map';
 
 type JeonseRow = { CGG_NM: string; STDG_NM: string; BLDG_USG: string; 평균전세가_만원: string; 거래건수: string };
@@ -13,7 +14,6 @@ type Transaction = {
   FLR: number | string; BLDG_USG: string; CTRT_PRD: string; NEW_UPDT_YN: string;
 };
 type YearCount = { year: number; count: number; fetched: number; total: number };
-type QuarterAverage = { key: string; label: string; jeonse: number | null; wolse: number | null; jeonseCount: number; wolseCount: number };
 const homeTypes = ['아파트', '단독다가구', '연립다세대', '오피스텔'];
 
 function parseCsv(text: string): JeonseRow[] {
@@ -38,56 +38,12 @@ function average(values: number[]) {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
 
-function PriceTrendChart({ title, data, field, color }: { title: string; data: QuarterAverage[]; field: 'jeonse' | 'wolse'; color: string }) {
-  const values = data.map((item) => item[field]).filter((value): value is number => value !== null);
-  const min = values.length ? Math.min(...values) : 0;
-  const max = Math.max(1, ...values);
-  const span = Math.max(1, max - min);
-  const plot = { left: 58, right: 760, top: 28, bottom: 205 };
-  const xFor = (index: number) => plot.left + (data.length <= 1 ? 0 : index * (plot.right - plot.left) / (data.length - 1));
-  const yFor = (value: number) => plot.bottom - ((value - min) / span) * (plot.bottom - plot.top);
-  const lineSegments: string[] = [];
-  let segment: string[] = [];
-  data.forEach((item, index) => {
-    const value = item[field];
-    if (value === null) {
-      if (segment.length) lineSegments.push(segment.join(' '));
-      segment = [];
-    } else {
-      segment.push(`${segment.length ? 'L' : 'M'} ${xFor(index)} ${yFor(value)}`);
-    }
-  });
-  if (segment.length) lineSegments.push(segment.join(' '));
-  return <Card className="border-slate-200 bg-white py-0 shadow-sm">
-    <CardHeader className="border-b border-slate-100 px-6 py-5"><CardTitle className="text-lg">{title}</CardTitle><p className="text-sm text-slate-500">분기별 평균 · 금액 단위 만원</p></CardHeader>
-    <CardContent className="px-4 py-5 sm:px-6">
-      {values.length ? <svg viewBox="0 0 800 260" className="block h-auto w-full" role="img" aria-label={title}>
-        <title>{title}</title>
-        {[0, 0.5, 1].map((ratio) => {
-          const value = max - span * ratio;
-          const y = plot.top + (plot.bottom - plot.top) * ratio;
-          return <g key={ratio}><line x1={plot.left} y1={y} x2={plot.right} y2={y} stroke="#e2e8f0" strokeWidth="1" /><text x={plot.left - 8} y={y + 4} textAnchor="end" className="fill-slate-400 text-[11px]">{Math.round(value).toLocaleString()}</text></g>;
-        })}
-        {lineSegments.map((path, index) => <path key={index} d={path} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />)}
-        {data.map((item, index) => {
-          const value = item[field];
-          if (value === null) return <text key={item.key} x={xFor(index)} y="235" textAnchor="middle" className="fill-slate-400 text-[10px]">{item.label}</text>;
-          const count = field === 'jeonse' ? item.jeonseCount : item.wolseCount;
-          return <g key={item.key}>
-            <circle cx={xFor(index)} cy={yFor(value)} r="5" fill="white" stroke={color} strokeWidth="3"><title>{`${item.label}: ${Math.round(value).toLocaleString()}만원 · ${count}건`}</title></circle>
-            <text x={xFor(index)} y="235" textAnchor="middle" className="fill-slate-600 text-[10px]">{item.label}</text>
-          </g>;
-        })}
-      </svg> : <div className="grid h-48 place-items-center text-sm text-slate-500">표시할 거래 데이터가 없습니다.</div>}
-    </CardContent>
-  </Card>;
-}
-
 export default function HomePage() {
   const [rows, setRows] = useState<JeonseRow[]>([]);
   const [district, setDistrict] = useState<string | null>(null);
   const [neighborhood, setNeighborhood] = useState<string | null>(null);
   const [homeType, setHomeType] = useState<string | null>(null);
+  const [selectionTab, setSelectionTab] = useState('district');
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [yearCounts, setYearCounts] = useState<YearCount[]>([]);
   const [loadingTransactions, setLoadingTransactions] = useState(false);
@@ -118,31 +74,11 @@ export default function HomePage() {
   }, [district, homeType]);
 
   const neighborhoods = useMemo(() => [...new Set(rows.filter((row) => row.CGG_NM === district).map((row) => row.STDG_NM))].sort((a, b) => a.localeCompare(b, 'ko')), [district, rows]);
+  const districts = useMemo(() => [...new Set(rows.map((row) => row.CGG_NM))].sort((a, b) => a.localeCompare(b, 'ko')), [rows]);
   const transactionTypes = ['전세', '월세'] as const;
   const selectedTransactions = useMemo(() => transactions.filter((row) => !neighborhood || row.STDG_NM === neighborhood), [neighborhood, transactions]);
   const averageJeonse = useMemo(() => average(selectedTransactions.filter((row) => row.RENT_SE === '전세').map((row) => Number(row.GRFE)).filter(Number.isFinite)), [selectedTransactions]);
   const averageWolse = useMemo(() => average(selectedTransactions.filter((row) => row.RENT_SE === '월세').map((row) => Number(row.RTFE)).filter(Number.isFinite)), [selectedTransactions]);
-  const quarterlyAverages = useMemo<QuarterAverage[]>(() => {
-    const years = yearCounts.map(({ year }) => year).sort((a, b) => a - b);
-    const quarters = years.flatMap((year) => [1, 2, 3, 4].map((quarter) => ({
-      key: `${year}-Q${quarter}`, label: `${String(year).slice(-2)}년 ${quarter}Q`, year, quarter,
-    })));
-    const buckets = new Map<string, Transaction[]>();
-    selectedTransactions.forEach((row) => {
-      if (!/^\d{8}$/.test(row.CTRT_DAY)) return;
-      const year = Number(row.CTRT_DAY.slice(0, 4));
-      const month = Number(row.CTRT_DAY.slice(4, 6));
-      if (month < 1 || month > 12) return;
-      const key = `${year}-Q${Math.floor((month - 1) / 3) + 1}`;
-      buckets.set(key, [...(buckets.get(key) ?? []), row]);
-    });
-    return quarters.map(({ key, label }) => {
-      const quarterRows = buckets.get(key) ?? [];
-      const jeonse = quarterRows.filter((row) => row.RENT_SE === '전세').map((row) => Number(row.GRFE)).filter(Number.isFinite);
-      const wolse = quarterRows.filter((row) => row.RENT_SE === '월세').map((row) => Number(row.RTFE)).filter(Number.isFinite);
-      return { key, label, jeonse: average(jeonse), wolse: average(wolse), jeonseCount: jeonse.length, wolseCount: wolse.length };
-    });
-  }, [selectedTransactions, yearCounts]);
   const isPartialHistory = yearCounts.some((year) => year.total > year.fetched);
   return (
     <main className="min-h-screen bg-[#f7f9fc] text-slate-900">
@@ -158,17 +94,34 @@ export default function HomePage() {
               <div className="flex items-start justify-between gap-4"><div><CardTitle className="text-lg">서울 동 단위 지도</CardTitle><p className="mt-1 text-sm text-slate-500">지도를 확대해 동 경계를 누르면 해당 동의 거래를 확인할 수 있습니다.</p></div><MapPin className="mt-1 size-5 text-blue-600" aria-hidden="true" /></div>
             </CardHeader>
             <CardContent className="p-4 sm:p-6">
-              <SeoulDongMap selectedDistrict={district} selectedDong={neighborhood} onSelect={(selectedGu, selectedDong) => { setDistrict(selectedGu); setNeighborhood(selectedDong); }} />
-              {error && <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>마우스 휠/핀치로 확대하고 드래그해 이동한 뒤 동 경계를 누르세요.</span><span className="flex items-center gap-1.5"><i className="size-3 rounded-sm bg-blue-600" />선택한 동</span></div>
-              <div className="mt-6 grid gap-4 sm:grid-cols-2">
-                <div><span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><MapPin className="size-4 text-blue-600" aria-hidden="true" />동 선택</span>
-                  <Select value={neighborhood} onValueChange={setNeighborhood} disabled={!district}><SelectTrigger className="h-11 w-full rounded-xl bg-white"><SelectValue placeholder={district ? '동을 선택하세요' : '먼저 지도에서 구를 선택하세요'} /></SelectTrigger><SelectContent className="max-h-72">{neighborhoods.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select>
-                </div>
-                <div><span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><Building2 className="size-4 text-blue-600" aria-hidden="true" />주택유형</span>
-                  <Select value={homeType} onValueChange={setHomeType}><SelectTrigger className="h-11 w-full rounded-xl bg-white"><SelectValue placeholder="주택유형을 선택하세요" /></SelectTrigger><SelectContent>{homeTypes.map((type) => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent></Select>
-                </div>
-              </div>
+              <Tabs value={selectionTab} onValueChange={setSelectionTab}>
+                <TabsList className="grid h-11 w-full grid-cols-2 rounded-xl bg-slate-100 p-1">
+                  <TabsTrigger value="district" className="rounded-lg">1. 구 선택</TabsTrigger>
+                  <TabsTrigger value="dong" className="rounded-lg" disabled={!district}>2. 동 선택</TabsTrigger>
+                </TabsList>
+                <TabsContent value="district" className="mt-4">
+                  <p className="mb-3 text-sm text-slate-500">먼저 거래를 확인할 서울 자치구를 선택하세요.</p>
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
+                    {districts.map((name) => <button key={name} type="button" onClick={() => { setDistrict(name); setNeighborhood(null); setSelectionTab('dong'); }} className={`rounded-xl border px-3 py-2.5 text-sm font-semibold transition-colors ${district === name ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50'}`}>{name}</button>)}
+                  </div>
+                </TabsContent>
+                <TabsContent value="dong" className="mt-4">
+                  {!district ? <p className="rounded-xl bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">먼저 ‘구 선택’ 탭에서 자치구를 선택하세요.</p> : <>
+                    <div className="mb-3 flex items-center justify-between gap-3"><p className="text-sm font-semibold text-slate-700">{district}에서 동을 선택하세요.</p><button type="button" className="text-xs font-semibold text-blue-600 hover:text-blue-800" onClick={() => setSelectionTab('district')}>구 변경</button></div>
+                    <SeoulDongMap selectedDistrict={district} selectedDong={neighborhood} districtFilter={district} onSelect={(_selectedGu, selectedDong) => setNeighborhood(selectedDong)} />
+                    {error && <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>지도를 확대하고 이동한 뒤 선택한 구의 동 경계를 누르세요.</span><span className="flex items-center gap-1.5"><i className="size-3 rounded-sm bg-blue-600" />선택한 동</span></div>
+                    <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                      <div><span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><MapPin className="size-4 text-blue-600" aria-hidden="true" />동 선택</span>
+                        <Select value={neighborhood} onValueChange={setNeighborhood}><SelectTrigger className="h-11 w-full rounded-xl bg-white"><SelectValue placeholder="동을 선택하세요" /></SelectTrigger><SelectContent className="max-h-72">{neighborhoods.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select>
+                      </div>
+                      <div><span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><Building2 className="size-4 text-blue-600" aria-hidden="true" />주택유형</span>
+                        <Select value={homeType} onValueChange={setHomeType}><SelectTrigger className="h-11 w-full rounded-xl bg-white"><SelectValue placeholder="주택유형을 선택하세요" /></SelectTrigger><SelectContent>{homeTypes.map((type) => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent></Select>
+                      </div>
+                    </div>
+                  </>}
+                </TabsContent>
+              </Tabs>
               {district && <div className="mt-4 flex items-center justify-between rounded-xl bg-blue-50 px-4 py-3"><p className="text-sm font-semibold text-blue-800">선택 지역 <span className="ml-2 text-blue-600">{district}{neighborhood ? ` · ${neighborhood}` : ''}</span></p><button type="button" className="text-xs font-semibold text-blue-600 hover:text-blue-800" onClick={() => { setDistrict(null); setNeighborhood(null); }}>지역 변경</button></div>}
             </CardContent>
           </Card>
@@ -208,10 +161,6 @@ export default function HomePage() {
               </CardContent>
             </Card>
           </div>
-        </section>
-        <section className="mt-7 grid gap-6 lg:grid-cols-2">
-          <PriceTrendChart title="지난 3년 분기별 전세 보증금 평균" data={!district || loadingTransactions || transactionError ? [] : quarterlyAverages} field="jeonse" color="#2563eb" />
-          <PriceTrendChart title="지난 3년 분기별 월세 평균" data={!district || loadingTransactions || transactionError ? [] : quarterlyAverages} field="wolse" color="#059669" />
         </section>
         <p className="mt-8 border-t border-slate-200 pt-5 text-xs leading-5 text-slate-500">평균은 최근 3개 접수연도 API 조회분 기준이며 단위는 만원입니다. API는 연도별 최대 1,000건을 반환합니다. 계약 자료는 서울시 열린데이터광장, 동 경계는 southkorea/seoul-maps (JUSO 2015) 자료를 사용합니다.</p>
       </div>
