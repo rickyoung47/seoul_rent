@@ -163,12 +163,9 @@ export default function HomePage() {
                     </div>
                   </div>
                   <div><span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><Building2 className="size-4 text-blue-600" aria-hidden="true" />주택유형</span>
-                    <Tabs value={homeType} onValueChange={setHomeType}>
-                      <TabsList className="grid h-auto w-full min-w-0 grid-cols-2 gap-1 overflow-hidden rounded-xl bg-slate-100 p-1 sm:grid-cols-3">
-                        <TabsTrigger value="all" className="min-w-0 overflow-hidden rounded-lg px-1.5 py-2 text-xs leading-tight">모든 유형</TabsTrigger>
-                        {homeTypes.map((type) => <TabsTrigger key={type} value={type} className="min-w-0 overflow-hidden rounded-lg px-1.5 py-2 text-xs leading-tight">{type}</TabsTrigger>)}
-                      </TabsList>
-                    </Tabs>
+                    <div role="group" aria-label="주택유형 선택" className="grid w-full min-w-0 grid-cols-2 gap-1.5 overflow-hidden rounded-xl bg-slate-100 p-1.5 sm:grid-cols-3">
+                      {[['all', '모든 유형'], ...homeTypes.map((type) => [type, type])].map(([value, label]) => <button key={value} type="button" aria-pressed={homeType === value} onClick={() => setHomeType(value)} className={`box-border flex min-h-10 min-w-0 w-full items-center justify-center overflow-hidden rounded-lg px-2 py-2 text-center text-xs font-semibold leading-tight transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${homeType === value ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-600 hover:bg-white/70'}`}>{label}</button>)}
+                    </div>
                   </div>
                   {district && <p className="rounded-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-800">선택 지역 <span className="ml-2 text-blue-600">{district}{neighborhood ? ` · ${neighborhood}` : ''}</span></p>}
                   {error && <p className="rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
