@@ -13,7 +13,7 @@ type Transaction = {
   FLR: number | string; BLDG_USG: string; CTRT_PRD: string; NEW_UPDT_YN: string;
 };
 type YearCount = { year: number; count: number; fetched: number; total: number };
-type AnnualAverage = { year: number; jeonse: number | null; wolse: number | null; jeonseCount: number; wolseCount: number };
+type QuarterAverage = { key: string; label: string; jeonse: number | null; wolse: number | null; jeonseCount: number; wolseCount: number };
 const homeTypes = ['아파트', '단독다가구', '연립다세대', '오피스텔'];
 
 function parseCsv(text: string): JeonseRow[] {
@@ -38,27 +38,44 @@ function average(values: number[]) {
   return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
 }
 
-function PriceTrendChart({ title, data, field, color }: { title: string; data: AnnualAverage[]; field: 'jeonse' | 'wolse'; color: string }) {
+function PriceTrendChart({ title, data, field, color }: { title: string; data: QuarterAverage[]; field: 'jeonse' | 'wolse'; color: string }) {
   const values = data.map((item) => item[field]).filter((value): value is number => value !== null);
+  const min = values.length ? Math.min(...values) : 0;
   const max = Math.max(1, ...values);
-  const baseline = 174;
-  const chartHeight = 122;
+  const span = Math.max(1, max - min);
+  const plot = { left: 58, right: 760, top: 28, bottom: 205 };
+  const xFor = (index: number) => plot.left + (data.length <= 1 ? 0 : index * (plot.right - plot.left) / (data.length - 1));
+  const yFor = (value: number) => plot.bottom - ((value - min) / span) * (plot.bottom - plot.top);
+  const lineSegments: string[] = [];
+  let segment: string[] = [];
+  data.forEach((item, index) => {
+    const value = item[field];
+    if (value === null) {
+      if (segment.length) lineSegments.push(segment.join(' '));
+      segment = [];
+    } else {
+      segment.push(`${segment.length ? 'L' : 'M'} ${xFor(index)} ${yFor(value)}`);
+    }
+  });
+  if (segment.length) lineSegments.push(segment.join(' '));
   return <Card className="border-slate-200 bg-white py-0 shadow-sm">
-    <CardHeader className="border-b border-slate-100 px-6 py-5"><CardTitle className="text-lg">{title}</CardTitle><p className="text-sm text-slate-500">연도별 평균 · 금액 단위 만원</p></CardHeader>
+    <CardHeader className="border-b border-slate-100 px-6 py-5"><CardTitle className="text-lg">{title}</CardTitle><p className="text-sm text-slate-500">분기별 평균 · 금액 단위 만원</p></CardHeader>
     <CardContent className="px-4 py-5 sm:px-6">
-      {data.some((item) => item[field] !== null) ? <svg viewBox="0 0 600 230" className="block h-auto w-full" role="img" aria-label={title}>
+      {values.length ? <svg viewBox="0 0 800 260" className="block h-auto w-full" role="img" aria-label={title}>
         <title>{title}</title>
-        <line x1="40" y1={baseline} x2="560" y2={baseline} stroke="#cbd5e1" strokeWidth="1" />
+        {[0, 0.5, 1].map((ratio) => {
+          const value = max - span * ratio;
+          const y = plot.top + (plot.bottom - plot.top) * ratio;
+          return <g key={ratio}><line x1={plot.left} y1={y} x2={plot.right} y2={y} stroke="#e2e8f0" strokeWidth="1" /><text x={plot.left - 8} y={y + 4} textAnchor="end" className="fill-slate-400 text-[11px]">{Math.round(value).toLocaleString()}</text></g>;
+        })}
+        {lineSegments.map((path, index) => <path key={index} d={path} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />)}
         {data.map((item, index) => {
           const value = item[field];
-          const height = value === null ? 0 : Math.max(4, (value / max) * chartHeight);
-          const x = 116 + index * 184;
-          const y = baseline - height;
+          if (value === null) return <text key={item.key} x={xFor(index)} y="235" textAnchor="middle" className="fill-slate-400 text-[10px]">{item.label}</text>;
           const count = field === 'jeonse' ? item.jeonseCount : item.wolseCount;
-          return <g key={item.year}>
-            {value !== null && <><rect x={x} y={y} width="68" height={height} rx="10" fill={color} /><text x={x + 34} y={Math.max(24, y - 10)} textAnchor="middle" className="fill-slate-700 text-[12px] font-semibold">{Math.round(value).toLocaleString()}</text></>}
-            <text x={x + 34} y="198" textAnchor="middle" className="fill-slate-800 text-[13px] font-bold">{item.year}년</text>
-            <text x={x + 34} y="218" textAnchor="middle" className="fill-slate-400 text-[10px]">{count.toLocaleString()}건 기준</text>
+          return <g key={item.key}>
+            <circle cx={xFor(index)} cy={yFor(value)} r="5" fill="white" stroke={color} strokeWidth="3"><title>{`${item.label}: ${Math.round(value).toLocaleString()}만원 · ${count}건`}</title></circle>
+            <text x={xFor(index)} y="235" textAnchor="middle" className="fill-slate-600 text-[10px]">{item.label}</text>
           </g>;
         })}
       </svg> : <div className="grid h-48 place-items-center text-sm text-slate-500">표시할 거래 데이터가 없습니다.</div>}
@@ -105,12 +122,27 @@ export default function HomePage() {
   const selectedTransactions = useMemo(() => transactions.filter((row) => !neighborhood || row.STDG_NM === neighborhood), [neighborhood, transactions]);
   const averageJeonse = useMemo(() => average(selectedTransactions.filter((row) => row.RENT_SE === '전세').map((row) => Number(row.GRFE)).filter(Number.isFinite)), [selectedTransactions]);
   const averageWolse = useMemo(() => average(selectedTransactions.filter((row) => row.RENT_SE === '월세').map((row) => Number(row.RTFE)).filter(Number.isFinite)), [selectedTransactions]);
-  const annualAverages = useMemo<AnnualAverage[]>(() => yearCounts.map(({ year }) => {
-    const yearRows = selectedTransactions.filter((row) => row.RCPT_YR === String(year));
-    const jeonse = yearRows.filter((row) => row.RENT_SE === '전세').map((row) => Number(row.GRFE)).filter(Number.isFinite);
-    const wolse = yearRows.filter((row) => row.RENT_SE === '월세').map((row) => Number(row.RTFE)).filter(Number.isFinite);
-    return { year, jeonse: average(jeonse), wolse: average(wolse), jeonseCount: jeonse.length, wolseCount: wolse.length };
-  }), [selectedTransactions, yearCounts]);
+  const quarterlyAverages = useMemo<QuarterAverage[]>(() => {
+    const years = yearCounts.map(({ year }) => year).sort((a, b) => a - b);
+    const quarters = years.flatMap((year) => [1, 2, 3, 4].map((quarter) => ({
+      key: `${year}-Q${quarter}`, label: `${String(year).slice(-2)}년 ${quarter}Q`, year, quarter,
+    })));
+    const buckets = new Map<string, Transaction[]>();
+    selectedTransactions.forEach((row) => {
+      if (!/^\d{8}$/.test(row.CTRT_DAY)) return;
+      const year = Number(row.CTRT_DAY.slice(0, 4));
+      const month = Number(row.CTRT_DAY.slice(4, 6));
+      if (month < 1 || month > 12) return;
+      const key = `${year}-Q${Math.floor((month - 1) / 3) + 1}`;
+      buckets.set(key, [...(buckets.get(key) ?? []), row]);
+    });
+    return quarters.map(({ key, label }) => {
+      const quarterRows = buckets.get(key) ?? [];
+      const jeonse = quarterRows.filter((row) => row.RENT_SE === '전세').map((row) => Number(row.GRFE)).filter(Number.isFinite);
+      const wolse = quarterRows.filter((row) => row.RENT_SE === '월세').map((row) => Number(row.RTFE)).filter(Number.isFinite);
+      return { key, label, jeonse: average(jeonse), wolse: average(wolse), jeonseCount: jeonse.length, wolseCount: wolse.length };
+    });
+  }, [selectedTransactions, yearCounts]);
   const isPartialHistory = yearCounts.some((year) => year.total > year.fetched);
   return (
     <main className="min-h-screen bg-[#f7f9fc] text-slate-900">
@@ -178,8 +210,8 @@ export default function HomePage() {
           </div>
         </section>
         <section className="mt-7 grid gap-6 lg:grid-cols-2">
-          <PriceTrendChart title="지난 3년 전세 보증금 평균" data={!district || loadingTransactions || transactionError ? [] : annualAverages} field="jeonse" color="#2563eb" />
-          <PriceTrendChart title="지난 3년 월세 평균" data={!district || loadingTransactions || transactionError ? [] : annualAverages} field="wolse" color="#059669" />
+          <PriceTrendChart title="지난 3년 분기별 전세 보증금 평균" data={!district || loadingTransactions || transactionError ? [] : quarterlyAverages} field="jeonse" color="#2563eb" />
+          <PriceTrendChart title="지난 3년 분기별 월세 평균" data={!district || loadingTransactions || transactionError ? [] : quarterlyAverages} field="wolse" color="#059669" />
         </section>
         <p className="mt-8 border-t border-slate-200 pt-5 text-xs leading-5 text-slate-500">평균은 최근 3개 접수연도 API 조회분 기준이며 단위는 만원입니다. API는 연도별 최대 1,000건을 반환합니다. 계약 자료는 서울시 열린데이터광장, 동 경계는 southkorea/seoul-maps (JUSO 2015) 자료를 사용합니다.</p>
       </div>
