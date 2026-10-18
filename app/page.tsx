@@ -47,7 +47,37 @@ function geometryPoints(feature: DistrictFeature) {
 function projectPoint([longitude, latitude]: number[], bounds: [number, number, number, number]) {
   const [minX, minY, maxX, maxY] = bounds;
   const padding = 18;
-  return [padding + ((longitude - minX) / (maxX - minX)) * (mapWidth - padding * 2), mapHeight - padding - ((latitude - minY) / (maxY - minY)) * (mapHeight - padding * 2)] as const;
+  const point = mercatorPixel(longitude, latitude, 11);
+  const topLeft = mercatorPixel(minX, maxY, 11);
+  const bottomRight = mercatorPixel(maxX, minY, 11);
+  return [padding + ((point[0] - topLeft[0]) / (bottomRight[0] - topLeft[0])) * (mapWidth - padding * 2), padding + ((point[1] - topLeft[1]) / (bottomRight[1] - topLeft[1])) * (mapHeight - padding * 2)] as const;
+}
+
+function mercatorPixel(longitude: number, latitude: number, zoom: number) {
+  const scale = 256 * 2 ** zoom;
+  const sinLatitude = Math.sin(Math.max(-85.05112878, Math.min(85.05112878, latitude)) * Math.PI / 180);
+  return [(longitude + 180) / 360 * scale, (0.5 - Math.log((1 + sinLatitude) / (1 - sinLatitude)) / (4 * Math.PI)) * scale] as const;
+}
+
+function mapTiles(bounds: [number, number, number, number]) {
+  const zoom = 11;
+  const [minLon, minLat, maxLon, maxLat] = bounds;
+  const topLeft = mercatorPixel(minLon, maxLat, zoom);
+  const bottomRight = mercatorPixel(maxLon, minLat, zoom);
+  const padding = 18;
+  const width = mapWidth - padding * 2;
+  const height = mapHeight - padding * 2;
+  const firstX = Math.floor(topLeft[0] / 256);
+  const lastX = Math.floor(bottomRight[0] / 256);
+  const firstY = Math.floor(topLeft[1] / 256);
+  const lastY = Math.floor(bottomRight[1] / 256);
+  return Array.from({ length: (lastX - firstX + 1) * (lastY - firstY + 1) }, (_, index) => {
+    const x = firstX + index % (lastX - firstX + 1);
+    const y = firstY + Math.floor(index / (lastX - firstX + 1));
+    const left = padding + (x * 256 - topLeft[0]) / (bottomRight[0] - topLeft[0]) * width;
+    const top = padding + (y * 256 - topLeft[1]) / (bottomRight[1] - topLeft[1]) * height;
+    return { x, y, left, top, width: 256 / (bottomRight[0] - topLeft[0]) * width, height: 256 / (bottomRight[1] - topLeft[1]) * height };
+  });
 }
 
 function featurePath(feature: DistrictFeature, bounds: [number, number, number, number]) {
@@ -197,12 +227,13 @@ export default function HomePage() {
             </CardHeader>
             <CardContent className="p-4 sm:p-6">
               <div className="overflow-hidden rounded-2xl bg-[#f2f6fb]">
-                {districts && bounds ? <svg viewBox={`0 0 ${mapWidth} ${mapHeight}`} className="mx-auto block h-auto w-full max-w-[590px]" aria-label="서울시 자치구 선택 지도"><title>서울시 자치구 선택 지도</title>
+                {districts && bounds ? <svg viewBox={`0 0 ${mapWidth} ${mapHeight}`} className="mx-auto block h-auto w-full max-w-[590px]" aria-label="VWorld 서울시 자치구 선택 지도"><title>VWorld 서울시 자치구 선택 지도</title>
+                  {mapTiles(bounds).map((tile) => <image key={`${tile.x}-${tile.y}`} href={`/api/vworld-tile?z=11&x=${tile.x}&y=${tile.y}`} x={tile.left} y={tile.top} width={tile.width} height={tile.height} preserveAspectRatio="none" />)}
                   {districts.features.map((feature) => {
                     const name = feature.properties.SIG_KOR_NM;
                     const [x, y] = featureCenter(feature, bounds);
                     const count = transactionCountByDistrict[name] || 0;
-                    const opacity = 0.22 + (count / maxDistrictCount) * 0.42;
+                    const opacity = 0.12 + (count / maxDistrictCount) * 0.28;
                     return <g key={name} className="cursor-pointer outline-none" role="button" tabIndex={0} aria-label={`${name} 선택`} aria-pressed={district === name} onClick={() => { setDistrict(name); setNeighborhood(null); }} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setDistrict(name); setNeighborhood(null); } }}>
                       <path d={featurePath(feature, bounds)} fill={district === name ? '#2563eb' : `rgba(59, 130, 246, ${opacity})`} stroke="white" strokeWidth="1.4" className="transition-colors hover:fill-blue-500 focus-visible:stroke-slate-900" />
                       <text x={x} y={y} textAnchor="middle" dominantBaseline="central" className={`pointer-events-none select-none text-[9px] font-semibold sm:text-[10px] ${district === name ? 'fill-white' : 'fill-slate-800'}`}>{name.replace('구', '')}</text>
@@ -210,7 +241,7 @@ export default function HomePage() {
                   })}
                 </svg> : <div className="grid h-72 place-items-center text-sm text-slate-500">{error || '지도를 불러오는 중입니다.'}</div>}
               </div>
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>색이 진할수록 기존 요약 데이터의 거래 건수가 많습니다.</span><span className="flex items-center gap-1.5"><i className="size-3 rounded-sm bg-blue-600" />선택한 구</span></div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>지도 출처: 브이월드 · 색이 진할수록 요약 데이터 거래 건수가 많습니다.</span><span className="flex items-center gap-1.5"><i className="size-3 rounded-sm bg-blue-600" />선택한 구</span></div>
               <div className="mt-6 grid gap-4 sm:grid-cols-2">
                 <div><span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><MapPin className="size-4 text-blue-600" aria-hidden="true" />동 선택</span>
                   <Select value={neighborhood} onValueChange={setNeighborhood} disabled={!district}><SelectTrigger className="h-11 w-full rounded-xl bg-white"><SelectValue placeholder={district ? '동을 선택하세요' : '먼저 지도에서 구를 선택하세요'} /></SelectTrigger><SelectContent className="max-h-72">{neighborhoods.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select>
