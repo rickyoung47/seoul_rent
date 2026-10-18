@@ -44,20 +44,29 @@ export function VWorldDongMap({ selectedDistrict, selectedDong, onSelect }: {
   useEffect(() => {
     let disposed = false;
     let map: any;
-    const loadSdk = () => new Promise<void>((resolve, reject) => {
+    const loadSdk = async () => {
       const existing = document.querySelector<HTMLScriptElement>('script[data-vworld-sdk]');
       if (existing) {
-        if ((window as any).vw?.ol3?.Map) resolve();
-        else { existing.addEventListener('load', () => resolve(), { once: true }); existing.addEventListener('error', () => reject(new Error('VWorld 지도를 불러오지 못했습니다.')), { once: true }); }
+        if ((window as any).vw?.ol3?.Map) return;
+        await new Promise<void>((resolve, reject) => {
+          existing.addEventListener('load', () => resolve(), { once: true });
+          existing.addEventListener('error', () => reject(new Error('VWorld 지도를 불러오지 못했습니다.')), { once: true });
+        });
         return;
       }
+      const configResponse = await fetch('/api/vworld-sdk-config', { cache: 'no-store' });
+      const config = await configResponse.json() as { scriptUrl?: string; error?: string };
+      if (!configResponse.ok || !config.scriptUrl) throw new Error(config.error || 'VWorld 지도 설정을 불러오지 못했습니다.');
       const script = document.createElement('script');
-      script.src = '/api/vworld-sdk';
+      script.src = config.scriptUrl;
       script.dataset.vworldSdk = 'true';
-      script.onload = () => resolve();
-      script.onerror = () => reject(new Error('VWorld 지도 SDK를 불러오지 못했습니다.'));
+      const scriptLoaded = new Promise<void>((resolve, reject) => {
+        script.onload = () => resolve();
+        script.onerror = () => reject(new Error('VWorld 지도 SDK를 불러오지 못했습니다.'));
+      });
       document.head.appendChild(script);
-    });
+      await scriptLoaded;
+    };
 
     async function initialize() {
       try {
