@@ -11,7 +11,7 @@ type Transaction = {
   RENT_AREA: number | string; GRFE: number | string; RTFE: number | string; BLDG_NM: string;
   FLR: number | string; BLDG_USG: string; CTRT_PRD: string; NEW_UPDT_YN: string;
 };
-type YearCount = { year: number; count: number; total: number };
+type YearCount = { year: number; count: number; fetched: number; total: number };
 type AnnualAverage = { year: number; jeonse: number | null; wolse: number | null; jeonseCount: number; wolseCount: number };
 type DistrictFeature = { type: 'Feature'; properties: { SIG_KOR_NM: string }; geometry: { type: 'Polygon' | 'MultiPolygon'; coordinates: number[][][][] | number[][][] } };
 type DistrictCollection = { type: 'FeatureCollection'; features: DistrictFeature[] };
@@ -146,12 +146,12 @@ export default function HomePage() {
   const averageJeonse = useMemo(() => average(selectedTransactions.filter((row) => row.RENT_SE === '전세').map((row) => Number(row.GRFE)).filter(Number.isFinite)), [selectedTransactions]);
   const averageWolse = useMemo(() => average(selectedTransactions.filter((row) => row.RENT_SE === '월세').map((row) => Number(row.RTFE)).filter(Number.isFinite)), [selectedTransactions]);
   const annualAverages = useMemo<AnnualAverage[]>(() => yearCounts.map(({ year }) => {
-    const yearRows = selectedTransactions.filter((row) => row.CTRT_DAY?.startsWith(String(year)));
+    const yearRows = selectedTransactions.filter((row) => row.RCPT_YR === String(year));
     const jeonse = yearRows.filter((row) => row.RENT_SE === '전세').map((row) => Number(row.GRFE)).filter(Number.isFinite);
     const wolse = yearRows.filter((row) => row.RENT_SE === '월세').map((row) => Number(row.RTFE)).filter(Number.isFinite);
     return { year, jeonse: average(jeonse), wolse: average(wolse), jeonseCount: jeonse.length, wolseCount: wolse.length };
   }), [selectedTransactions, yearCounts]);
-  const isPartialHistory = yearCounts.some((year) => year.total > year.count);
+  const isPartialHistory = yearCounts.some((year) => year.total > year.fetched);
   const transactionCountByDistrict = useMemo(() => rows.reduce<Record<string, number>>((acc, row) => { acc[row.CGG_NM] = (acc[row.CGG_NM] || 0) + Number(row.거래건수 || 0); return acc; }, {}), [rows]);
   const maxDistrictCount = Math.max(1, ...Object.values(transactionCountByDistrict));
 
@@ -219,7 +219,7 @@ export default function HomePage() {
                   {transactionTypes.map((type) => {
                     const filtered = selectedTransactions.filter((row) => row.RENT_SE === type).sort((a, b) => b.CTRT_DAY.localeCompare(a.CTRT_DAY));
                     return <section key={type} className="border-b border-slate-100 last:border-0">
-                      <div className="sticky top-0 z-10 flex items-center justify-between bg-slate-50 px-5 py-3"><h3 className="text-sm font-bold text-slate-800">{type}</h3><span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500">{filtered.length}건</span></div>
+                      <div className="sticky top-0 z-10 flex items-center justify-between bg-slate-50 px-5 py-3"><h3 className="text-sm font-bold text-slate-800">{type}</h3><span className="rounded-full bg-white px-2.5 py-1 text-xs font-semibold text-slate-500">조회 {filtered.length}건</span></div>
                       {filtered.length ? <ul className="divide-y divide-slate-100">{filtered.slice(0, 30).map((row, index) => <li key={`${row.CTRT_DAY}-${row.STDG_NM}-${row.BLDG_NM}-${index}`} className="px-5 py-4">
                         <div className="flex items-start justify-between gap-4"><div className="min-w-0"><p className="truncate text-sm font-semibold text-slate-900">{row.BLDG_NM || row.STDG_NM} <span className="font-normal text-slate-500">· {row.STDG_NM}</span></p><p className="mt-1 text-xs text-slate-500">{formatContractDate(row.CTRT_DAY)} · {row.BLDG_USG} · {row.RENT_AREA}㎡{row.FLR ? ` · ${row.FLR}층` : ''}</p></div><div className="shrink-0 text-right"><p className="text-sm font-bold text-blue-700">보증금 {formatPrice(Number(row.GRFE))}</p>{type === '월세' && <p className="mt-1 text-xs font-medium text-slate-600">월 {formatPrice(Number(row.RTFE))}</p>}</div></div>
                         {row.CTRT_PRD && <p className="mt-2 text-xs text-slate-400">계약 {row.CTRT_PRD}{row.NEW_UPDT_YN ? ` · ${row.NEW_UPDT_YN}` : ''}</p>}
@@ -233,8 +233,8 @@ export default function HomePage() {
           </div>
         </section>
         <section className="mt-7 grid gap-6 lg:grid-cols-2">
-          <PriceTrendChart title="지난 3년 전세 보증금 평균" data={!district || !homeType || loadingTransactions ? [] : annualAverages} field="jeonse" color="#2563eb" />
-          <PriceTrendChart title="지난 3년 월세 평균" data={!district || !homeType || loadingTransactions ? [] : annualAverages} field="wolse" color="#059669" />
+          <PriceTrendChart title="지난 3년 전세 보증금 평균" data={!district || !homeType || loadingTransactions || transactionError ? [] : annualAverages} field="jeonse" color="#2563eb" />
+          <PriceTrendChart title="지난 3년 월세 평균" data={!district || !homeType || loadingTransactions || transactionError ? [] : annualAverages} field="wolse" color="#059669" />
         </section>
         <p className="mt-8 border-t border-slate-200 pt-5 text-xs leading-5 text-slate-500">평균은 최근 3개 접수연도 API 조회분 기준이며 단위는 만원입니다. API는 연도별 최대 1,000건을 반환합니다. 계약 자료는 서울시 열린데이터광장, 지도 경계는 southkorea/seoul-maps 자료를 사용합니다.</p>
       </div>
