@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Building2, Database, Home, MapPin, Search } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { VWorldDongMap } from '@/components/vworld-dong-map';
+import { SeoulDongMap } from '@/components/seoul-dong-map';
 
 type JeonseRow = { CGG_NM: string; STDG_NM: string; BLDG_USG: string; 평균전세가_만원: string; 거래건수: string };
 type Transaction = {
@@ -126,9 +126,9 @@ export default function HomePage() {
               <div className="flex items-start justify-between gap-4"><div><CardTitle className="text-lg">서울 동 단위 지도</CardTitle><p className="mt-1 text-sm text-slate-500">지도를 확대해 동 경계를 누르면 해당 동의 거래를 확인할 수 있습니다.</p></div><MapPin className="mt-1 size-5 text-blue-600" aria-hidden="true" /></div>
             </CardHeader>
             <CardContent className="p-4 sm:p-6">
-              <VWorldDongMap selectedDistrict={district} selectedDong={neighborhood} onSelect={(selectedGu, selectedDong) => { setDistrict(selectedGu); setNeighborhood(selectedDong); }} />
+              <SeoulDongMap selectedDistrict={district} selectedDong={neighborhood} onSelect={(selectedGu, selectedDong) => { setDistrict(selectedGu); setNeighborhood(selectedDong); }} />
               {error && <p className="mt-3 rounded-lg bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p>}
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>지도 출처: 브이월드 · 지도를 확대하면 동 이름이 표시됩니다.</span><span className="flex items-center gap-1.5"><i className="size-3 rounded-sm bg-blue-600" />선택한 동</span></div>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span>마우스 휠/핀치로 확대하고 드래그해 이동한 뒤 동 경계를 누르세요.</span><span className="flex items-center gap-1.5"><i className="size-3 rounded-sm bg-blue-600" />선택한 동</span></div>
               <div className="mt-6 grid gap-4 sm:grid-cols-2">
                 <div><span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700"><MapPin className="size-4 text-blue-600" aria-hidden="true" />동 선택</span>
                   <Select value={neighborhood} onValueChange={setNeighborhood} disabled={!district}><SelectTrigger className="h-11 w-full rounded-xl bg-white"><SelectValue placeholder={district ? '동을 선택하세요' : '먼저 지도에서 구를 선택하세요'} /></SelectTrigger><SelectContent className="max-h-72">{neighborhoods.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}</SelectContent></Select>
